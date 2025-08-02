@@ -5,15 +5,13 @@
 
 	@description
 	This script is the server-side "brain" for the entire inventory system.
-	It manages all item containers (player inventories, chests, banks),
-	handles all item manipulation logic (adding, removing, moving),
+	It manages all item containers, handles all item manipulation logic,
 	and listens for client requests to ensure all actions are secure and valid.
 ]]
 
 --================================================================
 --||                     SERVICES & MODULES                     ||
 --================================================================
--- Services and modules required by this script.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -27,32 +25,19 @@ local requestMoveItemRemote = ReplicatedStorage.Remotes.RequestMoveItem
 --================================================================
 
 local InventoryManager = {}
-
--- This table is the master database holding every active container in the game.
--- The key is a unique containerId, and the value is the container data table.
 local Containers = {}
 
 --================================================================
 --||                   CORE API FUNCTIONS                       ||
 --================================================================
--- These are the main functions that control item containers.
 
---- Creates a new, empty container and stores it in the master list.
--- @param containerId string | A unique identifier for this container.
--- @param size number | The number of slots this container should have.
 function InventoryManager.CreateContainer(containerId, size)
 	if Containers[containerId] then return end
-	local newContainer = {
-		Size = size,
-		Slots = {}
-	}
+	local newContainer = { Size = size, Slots = {} }
 	Containers[containerId] = newContainer
 	print("Created container:", containerId, "with", size, "slots.")
 end
 
---- Finds the first available empty slot in a given container.
--- @param containerId string | The ID of the container to search.
--- @return number? | The index of the first empty slot, or nil if full.
 local function FindFirstEmptySlot(containerId)
 	local container = Containers[containerId]
 	if not container then return nil end
@@ -64,17 +49,11 @@ local function FindFirstEmptySlot(containerId)
 	return nil
 end
 
---- Adds an item to a container, placing it in the first empty slot.
--- @param containerId string | The ID of the container to add to.
--- @param itemID string | The ItemID from the ItemRegistry.
--- @param count number | The number of items in the stack.
--- @return boolean | True if the item was added successfully.
 function InventoryManager.AddItem(containerId, itemID, count)
 	local container = Containers[containerId]
 	if not container then return false end
 	local newItem = ItemFactory.Create(itemID, count)
 	if not newItem then return false end
-
 	local emptySlot = FindFirstEmptySlot(containerId)
 	if emptySlot then
 		container.Slots[emptySlot] = newItem
@@ -86,18 +65,14 @@ function InventoryManager.AddItem(containerId, itemID, count)
 	end
 end
 
---- Moves an item from one slot to another empty slot in the same container.
--- @param containerId string | The ID of the container.
--- @param fromSlot number | The slot index the item is currently in.
--- @param toSlot number | The slot index to move the item to.
--- @return boolean | True if the item was moved successfully.
+-- [THIS IS THE FIX] I have added a safety check to ensure slot numbers are valid.
 function InventoryManager.MoveItem(containerId, fromSlot, toSlot)
 	local container = Containers[containerId]
-	if not container or not container.Slots[fromSlot] then
-		return false
-	end
 
-	-- For now, we only move to empty slots. Swapping logic will be added later.
+	-- Safety Checks
+	if not container or not container.Slots[fromSlot] then return false end
+	if (fromSlot < 1 or fromSlot > container.Size) or (toSlot < 1 or toSlot > container.Size) then return false end
+
 	if container.Slots[toSlot] then
 		print("Move failed: Target slot", toSlot, "is already occupied.")
 		return false
@@ -112,22 +87,18 @@ end
 --================================================================
 --||             INTERNAL LOGIC & EVENT HANDLERS                ||
 --================================================================
--- These functions are triggered by game events, not called by other scripts.
 
---- Sets up the initial containers for a player when they join.
 local function onPlayerAdded(player)
 	local inventoryId = player.UserId .. "_Inventory"
 	local bankId = player.UserId .. "_Bank"
 	InventoryManager.CreateContainer(inventoryId, 30)
 	InventoryManager.CreateContainer(bankId, 128)
 	InventoryManager.AddItem(inventoryId, "HealthPotion", 5)
-
 	if Containers[inventoryId] then
 		updateContainerRemote:FireClient(player, "Inventory", Containers[inventoryId])
 	end
 end
 
---- Handles a client's request to view a container (Inventory, Bank, or Chest).
 local function onOpenContainerRequested(player, containerType, containerId)
 	local targetContainerId
 	if containerType == "Inventory" then
@@ -140,21 +111,15 @@ local function onOpenContainerRequested(player, containerType, containerId)
 			InventoryManager.CreateContainer(targetContainerId, 18)
 		end
 	end
-
 	if targetContainerId and Containers[targetContainerId] then
 		updateContainerRemote:FireClient(player, containerType, Containers[targetContainerId])
 	end
 end
 
---- Handles a client's request to move an item from one slot to another.
 local function onMoveItemRequested(player, containerType, fromSlot, toSlot)
 	if containerType ~= "Inventory" then return end
-
 	local containerId = player.UserId .. "_Inventory"
 	local success = InventoryManager.MoveItem(containerId, fromSlot, toSlot)
-
-	-- [THIS IS THE FIX]
-	-- If the server successfully moved the item, tell the client so its UI can refresh.
 	if success then
 		updateContainerRemote:FireClient(player, "Inventory", Containers[containerId])
 	end
@@ -163,13 +128,11 @@ end
 --================================================================
 --||                INITIALIZATION & CONNECTIONS                ||
 --================================================================
--- Connects all the event handlers when the script first runs.
 
 Players.PlayerAdded:Connect(onPlayerAdded)
 openContainerRemote.OnServerEvent:Connect(onOpenContainerRequested)
 requestMoveItemRemote.OnServerEvent:Connect(onMoveItemRequested)
 
--- Run the setup for any players who are already in the game when the server starts
 for _, player in ipairs(Players:GetPlayers()) do
 	task.spawn(onPlayerAdded, player)
 end
