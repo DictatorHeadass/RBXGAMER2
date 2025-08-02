@@ -1,4 +1,13 @@
--- In StarterGui/InventoryGui/InventoryController
+--[[
+	@module InventoryController
+	@author DictatorHeadass
+	@date August 2, 2025
+
+	@description
+	This script is the client-side "face" for the inventory system.
+	It handles all visual aspects, including creating the UI, drawing item icons,
+	managing player input like key presses, and creating the visuals for drag-and-drop operations.
+]]
 
 --================================================================
 --||                     SERVICES & MODULES                     ||
@@ -11,7 +20,7 @@ local UserInputService = game:GetService("UserInputService")
 local ItemRegistry = require(ReplicatedStorage.ItemRegistry)
 local UpdateContainerRemote = ReplicatedStorage.Remotes:WaitForChild("UpdateContainer")
 local RequestOpenContainerRemote = ReplicatedStorage.Remotes:WaitForChild("RequestOpenContainer")
-local RequestMoveItemRemote = ReplicatedStorage.Remotes:WaitForChild("RequestMoveItem") -- [DRAG & DROP] New Remote
+local RequestMoveItemRemote = ReplicatedStorage.Remotes:WaitForChild("RequestMoveItem")
 
 --================================================================
 --||                        UI REFERENCES                       ||
@@ -31,7 +40,7 @@ local strengthValueLabel = statsPanel:WaitForChild("StrengthValue")
 local dexterityValueLabel = statsPanel:WaitForChild("DexterityValue")
 local intelligenceValueLabel = statsPanel:WaitForChild("IntelligenceValue")
 
-local slotGrid = inventoryPanel 
+local slotGrid = inventoryPanel
 local slotTemplate = inventoryPanel:WaitForChild("SlotTemplate")
 
 --================================================================
@@ -39,10 +48,9 @@ local slotTemplate = inventoryPanel:WaitForChild("SlotTemplate")
 --================================================================
 
 local slotFrames = {}
-local INVENTORY_SIZE = 30 
-local containerData = nil -- [DRAG & DROP] Stores the latest inventory data from the server
+local INVENTORY_SIZE = 30
+local containerData = nil
 
--- [DRAG & DROP] State variables for managing drag operations
 local isDragging = false
 local dragStartSlot = nil
 local floatingIcon = nil
@@ -53,16 +61,14 @@ local floatingIcon = nil
 
 --- Takes item data and updates a UI slot to display it.
 local function drawSlot(slotFrame, itemData)
-	-- ... (This function remains unchanged)
 	local icon = slotFrame.Icon
 	local countLabel = slotFrame.Count
 	local nameLabel = slotFrame.ItemName
+	local debugLabel = slotFrame.DebugIndexLabel
+
 	if itemData then
 		local itemInfo = ItemRegistry[itemData.ItemID]
-		if not itemInfo then
-			warn("Rendering error: Could not find item info for '" .. itemData.ItemID .. "' in ItemRegistry.")
-			return
-		end
+		if not itemInfo then return end
 		icon.Image = itemInfo.Icon
 		nameLabel.Text = itemInfo.Name
 		icon.Visible = true
@@ -81,38 +87,29 @@ local function drawSlot(slotFrame, itemData)
 	end
 end
 
---- Sets the character preview image using the Roblox web endpoint.
+--- Sets the character preview image.
 local function setupCharacterDisplay(player)
-	-- ... (This function remains unchanged)
 	local avatarImage = characterPanel:WaitForChild("AvatarImage")
 	local url = "http://www.roblox.com/Thumbs/Avatar.ashx?x=420&y=420&Format=Png&username=" .. player.Name
 	avatarImage.Image = url
 end
 
---- Updates the stats panel with the character's and player's current information.
+--- Updates the stats panel.
 local function updateStatsDisplay(character)
-	-- ... (This function remains unchanged)
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
 	if not humanoid then return end
 	local function updateHealth()
-		local currentHealth = math.floor(humanoid.Health)
-		local maxHealth = math.floor(humanoid.MaxHealth)
-		healthValueLabel.Text = currentHealth .. " / " .. maxHealth
+		healthValueLabel.Text = math.floor(humanoid.Health) .. " / " .. math.floor(humanoid.MaxHealth)
 	end
 	updateHealth()
 	humanoid.HealthChanged:Connect(updateHealth)
 	humanoid:GetPropertyChangedSignal("MaxHealth"):Connect(updateHealth)
 	local leaderstats = player:WaitForChild("leaderstats")
 	local gold = leaderstats:WaitForChild("Gold")
-	local function updateGold()
-		goldValueLabel.Text = gold.Value
-	end
+	local function updateGold() goldValueLabel.Text = gold.Value end
 	updateGold()
 	gold.Changed:Connect(updateGold)
-	local function updateDefense()
-		local totalDefense = 0
-		defenseValueLabel.Text = totalDefense
-	end
+	local function updateDefense() defenseValueLabel.Text = 0 end
 	updateDefense()
 	local function updateCoreStats()
 		strengthValueLabel.Text = character:GetAttribute("Strength")
@@ -127,10 +124,10 @@ local function updateStatsDisplay(character)
 	end)
 end
 
---- Takes data from the server and updates the entire UI grid.
+--- Takes data from the server and updates the UI grid.
 local function onInventoryUpdate(containerType, newContainerData)
 	if containerType ~= "Inventory" then return end
-	containerData = newContainerData -- [DRAG & DROP] Update our local copy of the data
+	containerData = newContainerData
 	for i = 1, containerData.Size do
 		if slotFrames[i] then
 			local itemData = containerData.Slots[i]
@@ -140,7 +137,7 @@ local function onInventoryUpdate(containerType, newContainerData)
 end
 
 --- Handles the 'Q' key press to toggle the inventory.
-local function onInputBegan(input, gameProcessed)
+local function onKeypress(input, gameProcessed)
 	if gameProcessed then return end
 	if input.KeyCode == Enum.KeyCode.Q then
 		local isEnabled = not inventoryGui.Enabled
@@ -151,57 +148,62 @@ local function onInputBegan(input, gameProcessed)
 	end
 end
 
--- [DRAG & DROP] --- Fires when the mouse moves; updates the floating icon's position.
-UserInputService.InputChanged:Connect(function(input, gameProcessed)
-	if gameProcessed then return end
-	if input.UserInputType == Enum.UserInputType.MouseMovement and isDragging then
+--- Handles starting a drag on a specific slot.
+local function onDragBegan(slotFrame, input)
+	local slotIndex = slotFrame:GetAttribute("SlotIndex")
+	if not slotIndex then return end
+
+	if containerData and containerData.Slots[slotIndex] then
+		dragStartSlot = slotIndex
+		isDragging = true
+
+		local itemInfo = ItemRegistry[containerData.Slots[slotIndex].ItemID]
+		floatingIcon.Image = itemInfo.Icon
+		floatingIcon.Visible = true
 		floatingIcon.Position = UDim2.fromOffset(input.Position.X, input.Position.Y)
 	end
-end)
+end
 
---- Fires when the mouse button is released; handles the drop logic.
-UserInputService.InputEnded:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 and isDragging then
-		isDragging = false
-		floatingIcon.Visible = false
+--- Handles ending a drag anywhere on the screen.
+local function onDragEnded(input)
+	if not isDragging then return end
+	isDragging = false
+	floatingIcon.Visible = false
 
-		local targetSlot = nil
+	local targetSlot = nil
+	local guiObjects = player.PlayerGui:GetGuiObjectsAtPosition(input.Position.X, input.Position.Y)
 
-		-- [FIXED] This is a more reliable way to find which slot is under the mouse.
-		for i, frame in ipairs(slotFrames) do
-			local pos = frame.AbsolutePosition
-			local size = frame.AbsoluteSize
-			-- Check if the mouse's final position is within the boundaries of this frame
-			if input.Position.X >= pos.X and input.Position.X <= pos.X + size.X and
-				input.Position.Y >= pos.Y and input.Position.Y <= pos.Y + size.Y then
-				targetSlot = i
-				break
-			end
+	for _, guiObject in ipairs(guiObjects) do
+		local foundIndex = guiObject:GetAttribute("SlotIndex")
+		if foundIndex then
+			targetSlot = foundIndex
+			break
 		end
-
-		if targetSlot and targetSlot ~= dragStartSlot then
-			-- We found a valid slot to drop on, so tell the server.
-			RequestMoveItemRemote:FireServer("Inventory", dragStartSlot, targetSlot)
-		else
-			-- If no valid target slot was found, the item returns to its original spot.
-			-- We just need to refresh the UI from the server's data.
-			RequestOpenContainerRemote:FireServer("Inventory")
-		end
-
-		dragStartSlot = nil
 	end
-end)
 
+	if targetSlot and targetSlot ~= dragStartSlot then
+		RequestMoveItemRemote:FireServer("Inventory", dragStartSlot, targetSlot)
+	else
+		RequestOpenContainerRemote:FireServer("Inventory")
+	end
+
+	dragStartSlot = nil
+end
+
+--- Fires when the mouse moves; updates the floating icon's position.
+local function onMouseMoved(input)
+	if isDragging then
+		floatingIcon.Position = UDim2.fromOffset(input.Position.X, input.Position.Y)
+	end
+end
 
 --- Creates the empty slot frames and initializes all systems.
 local function initialize()
-	-- Create a single floating icon for drag-and-drop visuals
-	floatingIcon = Instance.new("ImageLabel")
-	floatingIcon.Size = UDim2.fromOffset(70, 70) -- Match your slot size
+	floatingIcon = Instance.new("ImageLabel", inventoryGui)
+	floatingIcon.Size = UDim2.fromOffset(70, 70)
 	floatingIcon.BackgroundTransparency = 1
 	floatingIcon.Visible = false
-	floatingIcon.ZIndex = 10 -- Make sure it renders on top of everything
-	floatingIcon.Parent = inventoryGui
+	floatingIcon.ZIndex = 10
 
 	slotTemplate.Visible = false
 	for i = 1, INVENTORY_SIZE do
@@ -209,39 +211,41 @@ local function initialize()
 		newSlot.Name = "Slot_" .. i
 		newSlot.Visible = true
 		newSlot.Parent = slotGrid
+		newSlot:SetAttribute("SlotIndex", i)
+		newSlot.DebugIndexLabel.Text = tostring(i)
 		slotFrames[i] = newSlot
 
-		-- [THIS IS THE FIX]
-		-- We create a local variable here to "capture" the correct slot number for the event.
-		local slotIndex = i 
-
+		-- Connect the drag start event for this specific button
 		newSlot.InputBegan:Connect(function(input)
 			if input.UserInputType == Enum.UserInputType.MouseButton1 then
-				-- Check if the slot isn't empty before starting a drag
-				if containerData and containerData.Slots[slotIndex] then -- Use the captured slotIndex
-					dragStartSlot = slotIndex -- Use the captured slotIndex
-					isDragging = true
-
-					-- Update and show the floating icon
-					local itemInfo = ItemRegistry[containerData.Slots[slotIndex].ItemID] -- Use the captured slotIndex
-					floatingIcon.Image = itemInfo.Icon
-					floatingIcon.Visible = true
-					floatingIcon.Position = UDim2.fromOffset(input.Position.X, input.Position.Y)
-				end
+				onDragBegan(newSlot, input)
 			end
 		end)
 	end
 
-	-- Connect other events
-	UserInputService.InputBegan:Connect(onInputBegan)
+	-- Connect global input events
+	UserInputService.InputBegan:Connect(onKeypress)
+	UserInputService.InputChanged:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseMovement then
+			onMouseMoved(input)
+		end
+	end)
+	UserInputService.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			onDragEnded(input)
+		end
+	end)
+
+	-- Connect server event
 	UpdateContainerRemote.OnClientEvent:Connect(onInventoryUpdate)
+
+	-- Setup initial displays
 	setupCharacterDisplay(player)
 	player.CharacterAdded:Connect(updateStatsDisplay)
 	if player.Character then
 		task.wait()
 		updateStatsDisplay(player.Character)
 	end
-
 	print("InventoryController initialized and ready.")
 end
 
